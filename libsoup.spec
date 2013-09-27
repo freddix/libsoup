@@ -1,20 +1,20 @@
 Summary:	SOAP (Simple Object Access Protocol) implementation in C
 Name:		libsoup
-Version:	2.42.2
+Version:	2.44.0
 Release:	1
 License:	LGPL v2
 Group:		Libraries
-Source0:	http://ftp.gnome.org/pub/gnome/sources/libsoup/2.42/%{name}-%{version}.tar.xz
-# Source0-md5:	7d19a84f9eecba53187f5c2ae13fd83e
+Source0:	http://ftp.gnome.org/pub/gnome/sources/libsoup/2.44/%{name}-%{version}.tar.xz
+# Source0-md5:	30ac8ecfb3b1ab2a1579e84462ad0548
 URL:		http://www.gnome.org/
 BuildRequires:	autoconf
 BuildRequires:	automake
-BuildRequires:	glib-devel
+BuildRequires:	glib-devel >= 1:2.38.0
 BuildRequires:	gnutls-devel
-BuildRequires:	gobject-introspection-devel
+BuildRequires:	gobject-introspection-devel >= 1.38.0
 BuildRequires:	gtk-doc
 BuildRequires:	intltool
-BuildRequires:	libgnome-keyring-devel
+BuildRequires:	libgnome-keyring-devel >= 3.10.0
 BuildRequires:	libgpg-error-devel
 BuildRequires:	libtool
 BuildRequires:	libxml2-devel
@@ -88,6 +88,8 @@ rm -rf $RPM_BUILD_ROOT
 	m4datadir=%{_aclocaldir} \
 	DESTDIR=$RPM_BUILD_ROOT
 
+%find_lang %{name}
+
 %clean
 rm -rf $RPM_BUILD_ROOT
 
@@ -97,7 +99,7 @@ rm -rf $RPM_BUILD_ROOT
 %post   gnome -p /usr/sbin/ldconfig
 %postun gnome -p /usr/sbin/ldconfig
 
-%files
+%files -f %{name}.lang
 %defattr(644,root,root,755)
 %doc AUTHORS NEWS README
 %attr(755,root,root) %ghost %{_libdir}/libsoup-%{apiver}.so.?
@@ -107,7 +109,6 @@ rm -rf $RPM_BUILD_ROOT
 %files devel
 %defattr(644,root,root,755)
 %attr(755,root,root) %{_libdir}/libsoup-%{apiver}.so
-%{_libdir}/libsoup-%{apiver}.la
 %{_includedir}/libsoup-%{apiver}
 %{_pkgconfigdir}/libsoup-%{apiver}.pc
 %{_datadir}/gir-1.0/Soup-2.4.gir
@@ -121,7 +122,6 @@ rm -rf $RPM_BUILD_ROOT
 %files gnome-devel
 %defattr(644,root,root,755)
 %attr(755,root,root) %{_libdir}/libsoup-gnome-%{apiver}.so
-%{_libdir}/libsoup-gnome-%{apiver}.la
 %{_includedir}/libsoup-gnome-%{apiver}
 %{_pkgconfigdir}/libsoup-gnome-%{apiver}.pc
 %{_datadir}/gir-1.0/SoupGNOME-2.4.gir
