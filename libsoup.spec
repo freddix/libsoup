@@ -1,20 +1,20 @@
 Summary:	SOAP (Simple Object Access Protocol) implementation in C
 Name:		libsoup
-Version:	2.44.2
+Version:	2.46.0
 Release:	1
 License:	LGPL v2
 Group:		Libraries
-Source0:	http://ftp.gnome.org/pub/gnome/sources/libsoup/2.44/%{name}-%{version}.tar.xz
-# Source0-md5:	92aa3667357157e8f3489bcca287f2fa
+Source0:	http://ftp.gnome.org/pub/gnome/sources/libsoup/2.46/%{name}-%{version}.tar.xz
+# Source0-md5:	86765c0093efaf3006fa2960d170d097
 URL:		http://www.gnome.org/
 BuildRequires:	autoconf
 BuildRequires:	automake
-BuildRequires:	glib-devel >= 1:2.38.0
+BuildRequires:	glib-devel >= 1:2.40.0
 BuildRequires:	gnutls-devel
-BuildRequires:	gobject-introspection-devel >= 1.38.0
+BuildRequires:	gobject-introspection-devel >= 1.40.0
 BuildRequires:	gtk-doc
 BuildRequires:	intltool
-BuildRequires:	libgnome-keyring-devel >= 3.10.0
+BuildRequires:	libgnome-keyring-devel >= 3.12.0
 BuildRequires:	libgpg-error-devel
 BuildRequires:	libtool
 BuildRequires:	libxml2-devel
@@ -87,6 +87,8 @@ rm -rf $RPM_BUILD_ROOT
 	pkgconfigdir=%{_pkgconfigdir} \
 	m4datadir=%{_aclocaldir} \
 	DESTDIR=$RPM_BUILD_ROOT
+
+%{__rm} $RPM_BUILD_ROOT%{_libdir}/*.la
 
 %find_lang %{name}
 
