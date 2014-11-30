@@ -1,15 +1,17 @@
 Summary:	SOAP (Simple Object Access Protocol) implementation in C
 Name:		libsoup
 Version:	2.48.0
-Release:	1
+Release:	2
 License:	LGPL v2
 Group:		Libraries
 Source0:	http://ftp.gnome.org/pub/gnome/sources/libsoup/2.48/%{name}-%{version}.tar.xz
 # Source0-md5:	51ccb76f5262945e1f0316fdc46de567
+Patch0:		%{name}-bug739951.patch
 URL:		http://www.gnome.org/
 BuildRequires:	autoconf
 BuildRequires:	automake
 BuildRequires:	glib-devel >= 1:2.42.0
+BuildRequires:	glib-networking
 BuildRequires:	gnutls-devel
 BuildRequires:	gobject-introspection-devel >= 1.42.0
 BuildRequires:	gtk-doc
@@ -64,6 +66,7 @@ libsoup API documentation.
 
 %prep
 %setup -q
+%patch0 -p1
 
 %build
 %{__gtkdocize}
@@ -90,6 +93,9 @@ rm -rf $RPM_BUILD_ROOT
 %{__rm} $RPM_BUILD_ROOT%{_libdir}/*.la
 
 %find_lang %{name}
+
+%check
+%{__make} -j1 check
 
 %clean
 rm -rf $RPM_BUILD_ROOT

@@ -1,0 +1,274 @@
+From c8ff05b7308818b914ab7738fdaf3dbf5fa11e16 Mon Sep 17 00:00:00 2001
+From: Dan Winship <danw@gnome.org>
+Date: Sun, 23 Nov 2014 17:20:50 -0500
+Subject: SoupConnection: fix connection in TLS_HANDSHAKING event signal
+
+SoupConnection was generating its own :event signals for
+TLS_HANDSHAKING/TLS_HANDSHAKED, since we don't use GSocketClient's TLS
+negotiation, and so just re-emitting the socket client signal won't
+cover that.
+
+However, it ended up emitting it before the SoupSocket had even
+created the GTlsClientConnection, and so was emitting it with the
+GTcpConnection, contrary to the documentation.
+
+Fix this by making the SoupSocket generate those event signals at the
+correct time, and having SoupConnection just re-emit them. Also, add
+code to connection-test to verify that each even is emitted with the
+expected kind of GIOStream.
+
+https://bugzilla.gnome.org/show_bug.cgi?id=739951
+
+diff --git a/libsoup/soup-connection.c b/libsoup/soup-connection.c
+index 48df8e3..436b8cb 100644
+--- a/libsoup/soup-connection.c
++++ b/libsoup/soup-connection.c
+@@ -327,14 +327,7 @@ socket_connect_finished (GTask *task, SoupSocket *sock, GError *error)
+ 	SoupConnection *conn = g_task_get_source_object (task);
+ 	SoupConnectionPrivate *priv = SOUP_CONNECTION_GET_PRIVATE (conn);
+ 
+-	g_signal_handlers_disconnect_by_func (sock, G_CALLBACK (re_emit_socket_event), conn);
+-
+ 	if (!error) {
+-		if (priv->ssl && !priv->proxy_uri) {
+-			soup_connection_event (conn,
+-					       G_SOCKET_CLIENT_TLS_HANDSHAKED,
+-					       NULL);
+-		}
+ 		if (!priv->ssl || !priv->proxy_uri) {
+ 			soup_connection_event (conn,
+ 					       G_SOCKET_CLIENT_COMPLETE,
+@@ -379,10 +372,6 @@ socket_connect_complete (GObject *object, GAsyncResult *result, gpointer user_da
+ 	priv->proxy_uri = soup_socket_get_http_proxy_uri (sock);
+ 
+ 	if (priv->ssl && !priv->proxy_uri) {
+-		soup_connection_event (conn,
+-				       G_SOCKET_CLIENT_TLS_HANDSHAKING,
+-				       NULL);
+-
+ 		soup_socket_handshake_async (sock, priv->remote_uri->host,
+ 					     g_task_get_cancellable (task),
+ 					     socket_handshake_complete, task);
+@@ -448,9 +437,7 @@ soup_connection_connect_sync (SoupConnection  *conn,
+ 			      GError         **error)
+ {
+ 	SoupConnectionPrivate *priv;
+-	guint event_id = 0;
+ 	SoupAddress *remote_addr;
+-	gboolean success = TRUE;
+ 
+ 	g_return_val_if_fail (SOUP_IS_CONNECTION (conn), FALSE);
+ 	priv = SOUP_CONNECTION_GET_PRIVATE (conn);
+@@ -474,28 +461,18 @@ soup_connection_connect_sync (SoupConnection  *conn,
+ 				 NULL);
+ 	g_object_unref (remote_addr);
+ 
+-	event_id = g_signal_connect (priv->socket, "event",
+-				     G_CALLBACK (re_emit_socket_event), conn);
+-	if (!soup_socket_connect_sync_internal (priv->socket, cancellable, error)) {
+-		success = FALSE;
+-		goto done;
+-	}
++	g_signal_connect (priv->socket, "event",
++			  G_CALLBACK (re_emit_socket_event), conn);
++	if (!soup_socket_connect_sync_internal (priv->socket, cancellable, error))
++		return FALSE;
+ 
+ 	priv->proxy_uri = soup_socket_get_http_proxy_uri (priv->socket);
+ 
+ 	if (priv->ssl && !priv->proxy_uri) {
+-		soup_connection_event (conn,
+-				       G_SOCKET_CLIENT_TLS_HANDSHAKING,
+-				       NULL);
+ 		if (!soup_socket_handshake_sync (priv->socket,
+ 						 priv->remote_uri->host,
+-						 cancellable, error)) {
+-			success = FALSE;
+-			goto done;
+-		}
+-		soup_connection_event (conn,
+-				       G_SOCKET_CLIENT_TLS_HANDSHAKED,
+-				       NULL);
++						 cancellable, error))
++			return FALSE;
+ 	}
+ 
+ 	if (!priv->ssl || !priv->proxy_uri) {
+@@ -507,11 +484,7 @@ soup_connection_connect_sync (SoupConnection  *conn,
+ 	priv->unused_timeout = time (NULL) + SOUP_CONNECTION_UNUSED_TIMEOUT;
+ 	start_idle_timer (conn);
+ 
+- done:
+-	if (priv->socket && event_id)
+-		g_signal_handler_disconnect (priv->socket, event_id);
+-
+-	return success;
++	return TRUE;
+ }
+ 
+ gboolean
+@@ -535,10 +508,8 @@ soup_connection_start_ssl_sync (SoupConnection  *conn,
+ 	g_return_val_if_fail (SOUP_IS_CONNECTION (conn), FALSE);
+ 	priv = SOUP_CONNECTION_GET_PRIVATE (conn);
+ 
+-	soup_connection_event (conn, G_SOCKET_CLIENT_TLS_HANDSHAKING, NULL);
+ 	if (soup_socket_handshake_sync (priv->socket, priv->remote_uri->host,
+ 					cancellable, error)) {
+-		soup_connection_event (conn, G_SOCKET_CLIENT_TLS_HANDSHAKED, NULL);
+ 		soup_connection_event (conn, G_SOCKET_CLIENT_COMPLETE, NULL);
+ 		return TRUE;
+ 	} else
+@@ -554,7 +525,6 @@ start_ssl_completed (GObject *object, GAsyncResult *result, gpointer user_data)
+ 	GError *error = NULL;
+ 
+ 	if (soup_socket_handshake_finish (priv->socket, result, &error)) {
+-		soup_connection_event (conn, G_SOCKET_CLIENT_TLS_HANDSHAKED, NULL);
+ 		soup_connection_event (conn, G_SOCKET_CLIENT_COMPLETE, NULL);
+ 		g_task_return_boolean (task, TRUE);
+ 	} else
+@@ -574,8 +544,6 @@ soup_connection_start_ssl_async (SoupConnection      *conn,
+ 	g_return_if_fail (SOUP_IS_CONNECTION (conn));
+ 	priv = SOUP_CONNECTION_GET_PRIVATE (conn);
+ 
+-	soup_connection_event (conn, G_SOCKET_CLIENT_TLS_HANDSHAKING, NULL);
+-
+ 	soup_socket_properties_push_async_context (priv->socket_props);
+ 	task = g_task_new (conn, cancellable, callback, user_data);
+ 
+@@ -616,6 +584,8 @@ soup_connection_disconnect (SoupConnection *conn)
+ 	if (priv->socket) {
+ 		SoupSocket *socket = priv->socket;
+ 
++		g_signal_handlers_disconnect_by_func (socket, G_CALLBACK (re_emit_socket_event), conn);
++
+ 		priv->socket = NULL;
+ 		soup_socket_disconnect (socket);
+ 		g_object_unref (socket);
+diff --git a/libsoup/soup-socket.c b/libsoup/soup-socket.c
+index 994d3dc..8838eba 100644
+--- a/libsoup/soup-socket.c
++++ b/libsoup/soup-socket.c
+@@ -811,6 +811,15 @@ soup_socket_new (const char *optname1, ...)
+ }
+ 
+ static void
++soup_socket_event (SoupSocket         *sock,
++		   GSocketClientEvent  event,
++		   GIOStream          *connection)
++{
++	g_signal_emit (sock, signals[EVENT], 0,
++		       event, connection);
++}
++
++static void
+ re_emit_socket_client_event (GSocketClient       *client,
+ 			     GSocketClientEvent   event,
+ 			     GSocketConnectable  *connectable,
+@@ -819,8 +828,7 @@ re_emit_socket_client_event (GSocketClient       *client,
+ {
+ 	SoupSocket *sock = user_data;
+ 
+-	g_signal_emit (sock, signals[EVENT], 0,
+-		       event, connection);
++	soup_socket_event (sock, event, connection);
+ }
+ 
+ static gboolean
+@@ -1407,8 +1415,14 @@ soup_socket_handshake_sync (SoupSocket    *sock,
+ 	if (!soup_socket_setup_ssl (sock, ssl_host, cancellable, error))
+ 		return FALSE;
+ 
+-	return g_tls_connection_handshake (G_TLS_CONNECTION (priv->conn),
+-					   cancellable, error);
++	soup_socket_event (sock, G_SOCKET_CLIENT_TLS_HANDSHAKING, priv->conn);
++
++	if (!g_tls_connection_handshake (G_TLS_CONNECTION (priv->conn),
++					 cancellable, error))
++		return FALSE;
++
++	soup_socket_event (sock, G_SOCKET_CLIENT_TLS_HANDSHAKED, priv->conn);
++	return TRUE;
+ }
+ 
+ static void
+@@ -1418,9 +1432,13 @@ handshake_async_ready (GObject *source, GAsyncResult *result, gpointer user_data
+ 	GError *error = NULL;
+ 
+ 	if (g_tls_connection_handshake_finish (G_TLS_CONNECTION (source),
+-					       result, &error))
++					       result, &error)) {
++		SoupSocket *sock = g_task_get_source_object (task);
++		SoupSocketPrivate *priv = SOUP_SOCKET_GET_PRIVATE (sock);
++
++		soup_socket_event (sock, G_SOCKET_CLIENT_TLS_HANDSHAKED, priv->conn);
+ 		g_task_return_boolean (task, TRUE);
+-	else
++	} else
+ 		g_task_return_error (task, error);
+ 	g_object_unref (task);
+ }
+@@ -1444,6 +1462,8 @@ soup_socket_handshake_async (SoupSocket          *sock,
+ 		return;
+ 	}
+ 
++	soup_socket_event (sock, G_SOCKET_CLIENT_TLS_HANDSHAKING, priv->conn);
++
+ 	g_tls_connection_handshake_async (G_TLS_CONNECTION (priv->conn),
+ 					  G_PRIORITY_DEFAULT,
+ 					  cancellable, handshake_async_ready,
+diff --git a/tests/connection-test.c b/tests/connection-test.c
+index d953a77..f4846c3 100644
+--- a/tests/connection-test.c
++++ b/tests/connection-test.c
+@@ -768,11 +768,46 @@ network_event (SoupMessage *msg, GSocketClientEvent event,
+ {
+ 	const char **events = user_data;
+ 
+-	debug_printf (2, "      %s\n", event_name_from_abbrev (**events));
++	debug_printf (2, "      %s\n", event_names[event]);
+ 	soup_test_assert (**events == event_abbrevs[event],
+-			  "Unexpected event: %s (expected %s)\n",
++			  "Unexpected event: %s (expected %s)",
+ 			  event_names[event],
+ 			  event_name_from_abbrev (**events));
++
++	if (**events == event_abbrevs[event]) {
++		if (event == G_SOCKET_CLIENT_RESOLVING ||
++		    event == G_SOCKET_CLIENT_RESOLVED) {
++			soup_test_assert (connection == NULL,
++					  "Unexpectedly got connection (%s) with '%s' event",
++					  G_OBJECT_TYPE_NAME (connection),
++					  event_names[event]);
++		} else if (event < G_SOCKET_CLIENT_TLS_HANDSHAKING) {
++			soup_test_assert (G_IS_SOCKET_CONNECTION (connection),
++					  "Unexpectedly got %s with '%s' event",
++					  G_OBJECT_TYPE_NAME (connection),
++					  event_names[event]);
++		} else if (event == G_SOCKET_CLIENT_TLS_HANDSHAKING ||
++			   event == G_SOCKET_CLIENT_TLS_HANDSHAKED) {
++			soup_test_assert (G_IS_TLS_CLIENT_CONNECTION (connection),
++					  "Unexpectedly got %s with '%s' event",
++					  G_OBJECT_TYPE_NAME (connection),
++					  event_names[event]);
++		} else if (event == G_SOCKET_CLIENT_COMPLETE) {
++			/* See if the previous expected event was TLS_HANDSHAKED */
++			if ((*events)[-1] == 'T') {
++				soup_test_assert (G_IS_TLS_CLIENT_CONNECTION (connection),
++						  "Unexpectedly got %s with '%s' event",
++						  G_OBJECT_TYPE_NAME (connection),
++						  event_names[event]);
++			} else {
++				soup_test_assert (G_IS_SOCKET_CONNECTION (connection),
++						  "Unexpectedly got %s with '%s' event",
++						  G_OBJECT_TYPE_NAME (connection),
++						  event_names[event]);
++			}
++		}
++	}
++
+ 	*events = *events + 1;
+ }
+ 
+-- 
+cgit v0.10.1
+
